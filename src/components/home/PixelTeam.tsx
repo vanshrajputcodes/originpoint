@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useReducedMotion } from "framer-motion";
-import teamAsset from "@/assets/team-photo.png.asset.json";
+import teamAsset from "@/assets/team-photo.png";
 
 /**
  * The real ORIGIN POINT study-team photo rendered as a live pixel mosaic.
