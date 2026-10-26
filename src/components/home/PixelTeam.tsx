@@ -1,7 +1,9 @@
+"use client";
+
 import { useEffect, useRef } from "react";
 import { useReducedMotion } from "framer-motion";
-import teamAsset from "@/assets/team-photo.png";
 
+const IMAGE_SRC = "/team-photo.png";
 const SOURCE_ASPECT = 2;
 const CELL = 8;
 const MAX_PARTICLES = 6000;
@@ -36,12 +38,13 @@ export function PixelTeam() {
     let particles: Particle[] = [];
     let width = 0;
     let height = 0;
+    let cellSize = CELL;
     let raf = 0;
     let resizeRaf = 0;
     let visible = false;
-    let revealed = false;
     let built = false;
-    let startTime = 0;
+    let revealStart = 0;
+    let animationComplete = false;
 
     const pointer = {
       x: 0,
@@ -55,20 +58,43 @@ export function PixelTeam() {
     const image = new Image();
     image.decoding = "async";
 
-    function draw(time: number) {
+    function drawStatic() {
+      if (!built) return;
+
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, width, height);
+      ctx.globalAlpha = 1;
+
+      const size = cellSize * 0.9;
+
+      for (const p of particles) {
+        ctx.fillStyle = `rgb(${p.r}, ${p.g}, ${p.b})`;
+        ctx.fillRect(
+          p.x - size / 2,
+          p.y - size / 2,
+          size,
+          size
+        );
+      }
+    }
+
+    function draw(timestamp: number) {
+      raf = 0;
+
       if (!built || !visible) return;
 
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, width, height);
 
-      pointer.sx += (pointer.x - pointer.sx) * 0.14;
-      pointer.sy += (pointer.y - pointer.sy) * 0.14;
+      pointer.sx += (pointer.x - pointer.sx) * 0.18;
+      pointer.sy += (pointer.y - pointer.sy) * 0.18;
 
-      const elapsed = Math.max(0, time - startTime);
-      const revealDuration = reducedMotion ? 0 : 1200;
-      const progress = Math.min(1, elapsed / revealDuration);
-      const easedReveal =
-        1 - Math.pow(1 - progress, 4);
+      const elapsed = timestamp - revealStart;
+      const progress = reducedMotion
+        ? 1
+        : Math.min(1, elapsed / 1200);
+
+      let hasMotion = progress < 1;
 
       for (const p of particles) {
         const localProgress = reducedMotion
@@ -88,15 +114,13 @@ export function PixelTeam() {
         if (pointer.active && !reducedMotion) {
           const dx = p.x - pointer.sx;
           const dy = p.y - pointer.sy;
-          const distance = Math.sqrt(dx * dx + dy * dy);
+          const distance = Math.hypot(dx, dy);
 
           if (distance < INFLUENCE_RADIUS) {
-            const falloff =
-              1 - distance / INFLUENCE_RADIUS;
-
+            const falloff = 1 - distance / INFLUENCE_RADIUS;
             target = falloff * falloff;
 
-            const force = target * 12;
+            const force = target * 10;
             const safeDistance = distance || 1;
 
             pushX = (dx / safeDistance) * force;
@@ -106,69 +130,83 @@ export function PixelTeam() {
 
         p.energy +=
           (target - p.energy) *
-          (target > p.energy ? 0.22 : 0.055);
+          (target > p.energy ? 0.22 : 0.07);
 
-        p.ox += (pushX - p.ox) * 0.13;
-        p.oy += (pushY - p.oy) * 0.13;
+        p.ox += (pushX - p.ox) * 0.14;
+        p.oy += (pushY - p.oy) * 0.14;
 
-        const blockSize = CELL * (0.84 + p.energy * 0.16);
-        const baseX = p.x;
-        const baseY = p.y;
+        if (
+          p.energy > 0.002 ||
+          Math.abs(p.ox) > 0.02 ||
+          Math.abs(p.oy) > 0.02
+        ) {
+          hasMotion = true;
+        }
 
-        // Reveal each block from a slightly offset position.
-        const offsetY = (1 - reveal) * 12;
-        const alpha = 0.94 * reveal;
+        const size = cellSize * (0.9 + p.energy * 0.15);
+        const offsetY = (1 - reveal) * 10;
 
-        ctx.globalAlpha = alpha;
+        ctx.globalAlpha = 0.96 * reveal;
         ctx.fillStyle = `rgb(${p.r}, ${p.g}, ${p.b})`;
 
         ctx.fillRect(
-          baseX + p.ox - blockSize / 2,
-          baseY + p.oy + offsetY - blockSize / 2,
-          blockSize,
-          blockSize
+          p.x + p.ox - size / 2,
+          p.y + p.oy + offsetY - size / 2,
+          size,
+          size
         );
       }
 
       ctx.globalAlpha = 1;
 
-      if (progress < 1 && !reducedMotion) {
-        raf = requestAnimationFrame(draw);
-      } else if (pointer.active && !reducedMotion) {
-        raf = requestAnimationFrame(draw);
-      } else if (!reducedMotion) {
-        const hasMotion = particles.some(
-          (p) =>
-            p.energy > 0.002 ||
-            Math.abs(p.ox) > 0.02 ||
-            Math.abs(p.oy) > 0.02
-        );
+      animationComplete = progress >= 1;
 
-        if (hasMotion) {
-          raf = requestAnimationFrame(draw);
-        }
+      if (!reducedMotion && (hasMotion || pointer.active)) {
+        raf = requestAnimationFrame(draw);
       }
     }
 
+    function startAnimation() {
+      if (!built || !visible || reducedMotion) return;
+
+      cancelAnimationFrame(raf);
+
+      if (animationComplete) {
+        // Keep the original reveal complete after pointer movement.
+        revealStart = performance.now() - 1200;
+      } else {
+        revealStart = performance.now();
+      }
+
+      raf = requestAnimationFrame(draw);
+    }
+
     function render() {
+      if (!wrap.isConnected || !image.complete || !image.naturalWidth) {
+        return;
+      }
+
       width = wrap.clientWidth;
-      if (!width || !image.complete || !image.naturalWidth) return;
+
+      if (!width) return;
 
       height = Math.round(width / SOURCE_ASPECT);
 
       canvas.width = Math.round(width * dpr);
       canvas.height = Math.round(height * dpr);
+
       canvas.style.width = "100%";
       canvas.style.height = "100%";
 
-      let cell = CELL;
-      let cols = Math.max(2, Math.floor(width / cell));
-      let rows = Math.max(2, Math.floor(height / cell));
+      cellSize = CELL;
+
+      let cols = Math.max(2, Math.floor(width / cellSize));
+      let rows = Math.max(2, Math.floor(height / cellSize));
 
       while (cols * rows > MAX_PARTICLES) {
-        cell += 1;
-        cols = Math.max(2, Math.floor(width / cell));
-        rows = Math.max(2, Math.floor(height / cell));
+        cellSize += 1;
+        cols = Math.max(2, Math.floor(width / cellSize));
+        rows = Math.max(2, Math.floor(height / cellSize));
       }
 
       const sample = document.createElement("canvas");
@@ -183,12 +221,20 @@ export function PixelTeam() {
 
       sampleCtx.drawImage(image, 0, 0, cols, rows);
 
-      const pixels = sampleCtx.getImageData(
-        0,
-        0,
-        cols,
-        rows
-      ).data;
+      let pixels: Uint8ClampedArray;
+
+      try {
+        pixels = sampleCtx.getImageData(
+          0,
+          0,
+          cols,
+          rows
+        ).data;
+      } catch (error) {
+        console.error("Unable to sample team photo:", error);
+        canvas.style.display = "none";
+        return;
+      }
 
       const cellW = width / cols;
       const cellH = height / rows;
@@ -205,8 +251,8 @@ export function PixelTeam() {
 
           if (a < 40) continue;
 
-          // Skip near-white background while retaining light details.
-          if (r > 247 && g > 247 && b > 247) continue;
+          // Remove nearly white background pixels only.
+          if (r > 250 && g > 250 && b > 250) continue;
 
           next.push({
             x: (x + 0.5) * cellW,
@@ -214,7 +260,7 @@ export function PixelTeam() {
             r,
             g,
             b,
-            delay: Math.random() * 0.25,
+            delay: Math.random() * 0.22,
             energy: 0,
             ox: 0,
             oy: 0,
@@ -224,34 +270,14 @@ export function PixelTeam() {
 
       particles = next;
       built = true;
+      animationComplete = false;
 
       cancelAnimationFrame(raf);
-      startTime = performance.now();
-      revealed = false;
 
       if (reducedMotion) {
-        revealed = true;
         drawStatic();
       } else if (visible) {
-        raf = requestAnimationFrame((t) => {
-          revealed = true;
-          draw(t);
-        });
-      }
-    }
-
-    function drawStatic() {
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, width, height);
-
-      for (const p of particles) {
-        ctx.fillStyle = `rgb(${p.r}, ${p.g}, ${p.b})`;
-        ctx.fillRect(
-          p.x - CELL * 0.44,
-          p.y - CELL * 0.44,
-          CELL * 0.88,
-          CELL * 0.88
-        );
+        startAnimation();
       }
     }
 
@@ -264,8 +290,7 @@ export function PixelTeam() {
       pointer.y = event.clientY - rect.top;
       pointer.active = true;
 
-      if (revealed && visible) {
-        cancelAnimationFrame(raf);
+      if (visible && built && !raf) {
         raf = requestAnimationFrame(draw);
       }
     }
@@ -273,22 +298,27 @@ export function PixelTeam() {
     function onPointerLeave() {
       pointer.active = false;
 
-      if (revealed && visible && !reducedMotion) {
-        cancelAnimationFrame(raf);
+      if (visible && built && !reducedMotion && !raf) {
         raf = requestAnimationFrame(draw);
       }
     }
 
     image.onload = render;
-    image.onerror = () => {
-      canvas.style.display = "none";
-      wrap.style.backgroundImage = `url("${image.src}")`;
-      wrap.style.backgroundSize = "cover";
-      wrap.style.backgroundPosition = "center";
-    };
-    image.src = teamAsset;
 
-    if (image.complete && image.naturalWidth) render();
+    image.onerror = () => {
+      console.error(`Failed to load team image: ${IMAGE_SRC}`);
+      canvas.style.display = "none";
+      wrap.style.backgroundImage = `url("${IMAGE_SRC}")`;
+      wrap.style.backgroundSize = "contain";
+      wrap.style.backgroundPosition = "center";
+      wrap.style.backgroundRepeat = "no-repeat";
+    };
+
+    image.src = IMAGE_SRC;
+
+    if (image.complete && image.naturalWidth) {
+      render();
+    }
 
     const resizeObserver = new ResizeObserver(() => {
       cancelAnimationFrame(resizeRaf);
@@ -301,20 +331,21 @@ export function PixelTeam() {
       (entries) => {
         visible = entries[0]?.isIntersecting ?? false;
 
-        if (visible && built && !revealed && !reducedMotion) {
-          startTime = performance.now();
-          cancelAnimationFrame(raf);
-          raf = requestAnimationFrame((t) => {
-            revealed = true;
-            draw(t);
-          });
-        }
-
         if (!visible) {
           cancelAnimationFrame(raf);
+          raf = 0;
+          return;
+        }
+
+        if (built && !reducedMotion) {
+          if (!animationComplete) {
+            startAnimation();
+          } else {
+            raf = requestAnimationFrame(draw);
+          }
         }
       },
-      { threshold: 0.1 }
+      { threshold: 0.05 }
     );
 
     intersectionObserver.observe(wrap);
@@ -322,6 +353,7 @@ export function PixelTeam() {
     wrap.addEventListener("pointermove", onPointerMove, {
       passive: true,
     });
+
     wrap.addEventListener("pointerleave", onPointerLeave, {
       passive: true,
     });
@@ -329,10 +361,13 @@ export function PixelTeam() {
     return () => {
       cancelAnimationFrame(raf);
       cancelAnimationFrame(resizeRaf);
+
       resizeObserver.disconnect();
       intersectionObserver.disconnect();
+
       wrap.removeEventListener("pointermove", onPointerMove);
       wrap.removeEventListener("pointerleave", onPointerLeave);
+
       image.onload = null;
       image.onerror = null;
     };
