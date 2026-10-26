@@ -3,9 +3,9 @@ import { useReducedMotion } from "framer-motion";
 import teamAsset from "@/assets/team-photo.png";
 
 const SOURCE_ASPECT = 2;
-const CELL = 10;
+const CELL = 8;
 const MAX_PARTICLES = 6000;
-const INFLUENCE_RADIUS = 150;
+const INFLUENCE_RADIUS = 130;
 
 interface Particle {
   x: number;
@@ -13,16 +13,16 @@ interface Particle {
   r: number;
   g: number;
   b: number;
-  phase: number;
+  delay: number;
   energy: number;
   ox: number;
   oy: number;
 }
 
 export function PixelTeam() {
-  const reduced = useReducedMotion();
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const reducedMotion = useReducedMotion();
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -30,13 +30,18 @@ export function PixelTeam() {
 
     if (!wrap || !canvas) return;
 
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
     let particles: Particle[] = [];
     let width = 0;
     let height = 0;
     let raf = 0;
     let resizeRaf = 0;
-    let visible = true;
+    let visible = false;
+    let revealed = false;
     let built = false;
+    let startTime = 0;
 
     const pointer = {
       x: 0,
@@ -47,41 +52,112 @@ export function PixelTeam() {
     };
 
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const image = new Image();
+    image.decoding = "async";
 
-    const drawStatic = () => {
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
+    function draw(time: number) {
+      if (!built || !visible) return;
 
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, width, height);
 
-      const blockSize = CELL * 0.88;
+      pointer.sx += (pointer.x - pointer.sx) * 0.14;
+      pointer.sy += (pointer.y - pointer.sy) * 0.14;
+
+      const elapsed = Math.max(0, time - startTime);
+      const revealDuration = reducedMotion ? 0 : 1200;
+      const progress = Math.min(1, elapsed / revealDuration);
+      const easedReveal =
+        1 - Math.pow(1 - progress, 4);
 
       for (const p of particles) {
+        const localProgress = reducedMotion
+          ? 1
+          : Math.max(
+              0,
+              Math.min(1, (progress - p.delay) / 0.72)
+            );
+
+        const reveal =
+          1 - Math.pow(1 - localProgress, 3);
+
+        let target = 0;
+        let pushX = 0;
+        let pushY = 0;
+
+        if (pointer.active && !reducedMotion) {
+          const dx = p.x - pointer.sx;
+          const dy = p.y - pointer.sy;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+
+          if (distance < INFLUENCE_RADIUS) {
+            const falloff =
+              1 - distance / INFLUENCE_RADIUS;
+
+            target = falloff * falloff;
+
+            const force = target * 12;
+            const safeDistance = distance || 1;
+
+            pushX = (dx / safeDistance) * force;
+            pushY = (dy / safeDistance) * force;
+          }
+        }
+
+        p.energy +=
+          (target - p.energy) *
+          (target > p.energy ? 0.22 : 0.055);
+
+        p.ox += (pushX - p.ox) * 0.13;
+        p.oy += (pushY - p.oy) * 0.13;
+
+        const blockSize = CELL * (0.84 + p.energy * 0.16);
+        const baseX = p.x;
+        const baseY = p.y;
+
+        // Reveal each block from a slightly offset position.
+        const offsetY = (1 - reveal) * 12;
+        const alpha = 0.94 * reveal;
+
+        ctx.globalAlpha = alpha;
         ctx.fillStyle = `rgb(${p.r}, ${p.g}, ${p.b})`;
 
         ctx.fillRect(
-          p.x - blockSize / 2,
-          p.y - blockSize / 2,
+          baseX + p.ox - blockSize / 2,
+          baseY + p.oy + offsetY - blockSize / 2,
           blockSize,
           blockSize
         );
       }
-    };
 
-    const img = new Image();
-    img.decoding = "async";
+      ctx.globalAlpha = 1;
 
-    const build = () => {
+      if (progress < 1 && !reducedMotion) {
+        raf = requestAnimationFrame(draw);
+      } else if (pointer.active && !reducedMotion) {
+        raf = requestAnimationFrame(draw);
+      } else if (!reducedMotion) {
+        const hasMotion = particles.some(
+          (p) =>
+            p.energy > 0.002 ||
+            Math.abs(p.ox) > 0.02 ||
+            Math.abs(p.oy) > 0.02
+        );
+
+        if (hasMotion) {
+          raf = requestAnimationFrame(draw);
+        }
+      }
+    }
+
+    function render() {
       width = wrap.clientWidth;
-
-      if (!width || !img.complete || !img.naturalWidth) return;
+      if (!width || !image.complete || !image.naturalWidth) return;
 
       height = Math.round(width / SOURCE_ASPECT);
 
       canvas.width = Math.round(width * dpr);
       canvas.height = Math.round(height * dpr);
-
       canvas.style.width = "100%";
       canvas.style.height = "100%";
 
@@ -95,44 +171,50 @@ export function PixelTeam() {
         rows = Math.max(2, Math.floor(height / cell));
       }
 
-      const offscreen = document.createElement("canvas");
-      offscreen.width = cols;
-      offscreen.height = rows;
+      const sample = document.createElement("canvas");
+      sample.width = cols;
+      sample.height = rows;
 
-      const ctx = offscreen.getContext("2d", {
+      const sampleCtx = sample.getContext("2d", {
         willReadFrequently: true,
       });
 
-      if (!ctx) return;
+      if (!sampleCtx) return;
 
-      ctx.drawImage(img, 0, 0, cols, rows);
+      sampleCtx.drawImage(image, 0, 0, cols, rows);
 
-      const imageData = ctx.getImageData(0, 0, cols, rows).data;
+      const pixels = sampleCtx.getImageData(
+        0,
+        0,
+        cols,
+        rows
+      ).data;
+
       const cellW = width / cols;
       const cellH = height / rows;
       const next: Particle[] = [];
 
-      for (let gy = 0; gy < rows; gy++) {
-        for (let gx = 0; gx < cols; gx++) {
-          const i = (gy * cols + gx) * 4;
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          const i = (y * cols + x) * 4;
 
-          const r = imageData[i] ?? 0;
-          const g = imageData[i + 1] ?? 0;
-          const b = imageData[i + 2] ?? 0;
-          const a = imageData[i + 3] ?? 0;
+          const r = pixels[i];
+          const g = pixels[i + 1];
+          const b = pixels[i + 2];
+          const a = pixels[i + 3];
 
           if (a < 40) continue;
 
-          // Remove only near-white background pixels.
+          // Skip near-white background while retaining light details.
           if (r > 247 && g > 247 && b > 247) continue;
 
           next.push({
-            x: (gx + 0.5) * cellW,
-            y: (gy + 0.5) * cellH,
+            x: (x + 0.5) * cellW,
+            y: (y + 0.5) * cellH,
             r,
             g,
             b,
-            phase: Math.random() * Math.PI * 2,
+            delay: Math.random() * 0.25,
             energy: 0,
             ox: 0,
             oy: 0,
@@ -143,133 +225,118 @@ export function PixelTeam() {
       particles = next;
       built = true;
 
-      if (reduced) {
+      cancelAnimationFrame(raf);
+      startTime = performance.now();
+      revealed = false;
+
+      if (reducedMotion) {
+        revealed = true;
         drawStatic();
+      } else if (visible) {
+        raf = requestAnimationFrame((t) => {
+          revealed = true;
+          draw(t);
+        });
       }
-    };
+    }
 
-    const tick = (timeStamp: number) => {
-      raf = requestAnimationFrame(tick);
-
-      if (!visible || !built || reduced) return;
-
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-
+    function drawStatic() {
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, width, height);
 
-      pointer.sx += (pointer.x - pointer.sx) * 0.22;
-      pointer.sy += (pointer.y - pointer.sy) * 0.22;
-
-      const radius = INFLUENCE_RADIUS;
-      const radiusSquared = radius * radius;
-      const time = timeStamp / 1000;
-
       for (const p of particles) {
-        let target = 0;
-        let pushX = 0;
-        let pushY = 0;
-
-        if (pointer.active) {
-          const dx = p.x - pointer.sx;
-          const dy = p.y - pointer.sy;
-          const distanceSquared = dx * dx + dy * dy;
-
-          if (distanceSquared < radiusSquared) {
-            const distance = Math.sqrt(distanceSquared) || 1;
-            const falloff = 1 - distance / radius;
-
-            target = falloff * falloff;
-
-            const push = target * 9;
-            pushX = (dx / distance) * push;
-            pushY = (dy / distance) * push;
-          }
-        }
-
-        // Smooth energy response.
-        p.energy +=
-          (target - p.energy) * (target > p.energy ? 0.3 : 0.06);
-
-        p.ox += (pushX - p.ox) * 0.16;
-        p.oy += (pushY - p.oy) * 0.16;
-
-        // Keep the resting photo visible.
-        const wobble =
-          Math.sin(time * 1.2 + p.phase) * 0.15;
-
-        const blockSize = CELL * (0.88 + p.energy * 0.18);
-        const alpha = 0.82 + p.energy * 0.18;
-
-        ctx.fillStyle = `rgba(${p.r}, ${p.g}, ${p.b}, ${alpha})`;
-
+        ctx.fillStyle = `rgb(${p.r}, ${p.g}, ${p.b})`;
         ctx.fillRect(
-          p.x + p.ox + wobble - blockSize / 2,
-          p.y + p.oy - p.energy * 2 - blockSize / 2,
-          blockSize,
-          blockSize
+          p.x - CELL * 0.44,
+          p.y - CELL * 0.44,
+          CELL * 0.88,
+          CELL * 0.88
         );
       }
-    };
-
-    img.onload = build;
-    img.src = teamAsset;
-
-    if (img.complete && img.naturalWidth) {
-      build();
     }
 
-    const onMove = (event: PointerEvent) => {
-      if (reduced || event.pointerType === "touch") return;
+    function onPointerMove(event: PointerEvent) {
+      if (reducedMotion || event.pointerType === "touch") return;
 
       const rect = canvas.getBoundingClientRect();
 
       pointer.x = event.clientX - rect.left;
       pointer.y = event.clientY - rect.top;
       pointer.active = true;
-    };
 
-    const onLeave = () => {
+      if (revealed && visible) {
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(draw);
+      }
+    }
+
+    function onPointerLeave() {
       pointer.active = false;
+
+      if (revealed && visible && !reducedMotion) {
+        cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(draw);
+      }
+    }
+
+    image.onload = render;
+    image.onerror = () => {
+      canvas.style.display = "none";
+      wrap.style.backgroundImage = `url("${image.src}")`;
+      wrap.style.backgroundSize = "cover";
+      wrap.style.backgroundPosition = "center";
     };
+    image.src = teamAsset;
 
-    wrap.addEventListener("pointermove", onMove, {
-      passive: true,
-    });
-
-    wrap.addEventListener("pointerleave", onLeave, {
-      passive: true,
-    });
+    if (image.complete && image.naturalWidth) render();
 
     const resizeObserver = new ResizeObserver(() => {
       cancelAnimationFrame(resizeRaf);
-      resizeRaf = requestAnimationFrame(build);
+      resizeRaf = requestAnimationFrame(render);
     });
 
     resizeObserver.observe(wrap);
 
-    const intersectionObserver = new IntersectionObserver((entries) => {
-      visible = entries[0]?.isIntersecting ?? true;
-    });
+    const intersectionObserver = new IntersectionObserver(
+      (entries) => {
+        visible = entries[0]?.isIntersecting ?? false;
+
+        if (visible && built && !revealed && !reducedMotion) {
+          startTime = performance.now();
+          cancelAnimationFrame(raf);
+          raf = requestAnimationFrame((t) => {
+            revealed = true;
+            draw(t);
+          });
+        }
+
+        if (!visible) {
+          cancelAnimationFrame(raf);
+        }
+      },
+      { threshold: 0.1 }
+    );
 
     intersectionObserver.observe(wrap);
 
-    raf = requestAnimationFrame(tick);
+    wrap.addEventListener("pointermove", onPointerMove, {
+      passive: true,
+    });
+    wrap.addEventListener("pointerleave", onPointerLeave, {
+      passive: true,
+    });
 
     return () => {
       cancelAnimationFrame(raf);
       cancelAnimationFrame(resizeRaf);
-
       resizeObserver.disconnect();
       intersectionObserver.disconnect();
-
-      wrap.removeEventListener("pointermove", onMove);
-      wrap.removeEventListener("pointerleave", onLeave);
-
-      img.onload = null;
+      wrap.removeEventListener("pointermove", onPointerMove);
+      wrap.removeEventListener("pointerleave", onPointerLeave);
+      image.onload = null;
+      image.onerror = null;
     };
-  }, [reduced]);
+  }, [reducedMotion]);
 
   return (
     <div
