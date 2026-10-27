@@ -141,14 +141,19 @@ export function Header() {
       <header className="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur-md">
         <nav aria-label="Main" className="mx-auto flex h-16 max-w-7xl items-center gap-4 px-4 sm:px-6 lg:px-8">
           <Link to="/" className="flex shrink-0 items-center gap-2" aria-label="ORIGIN POINT home">
-            <img
-              src={orbitLogo.url}
-              alt={`${BRAND.name} logo`}
-              width={192}
-              height={64}
-              className="h-9 w-auto"
-            />
-          </Link>
+            <Link
+  to="/"
+  className="flex shrink-0 items-center gap-2"
+  aria-label="ORIGIN POINT home"
+>
+  <img
+    src="/orbit-logo.png"
+    alt={`${BRAND.name} logo`}
+    width={192}
+    height={64}
+    className="h-9 w-auto object-contain"
+  />
+</Link>
 
           {/* Desktop center nav */}
           <div className="hidden flex-1 items-center justify-center gap-1 lg:flex">
@@ -289,7 +294,13 @@ export function Footer() {
       <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8">
         <div className="grid gap-10 md:grid-cols-[1.4fr_repeat(3,1fr)]">
           <div>
-            <img src={orbitLogo.url} alt={`${BRAND.name} logo`} width={192} height={64} className="h-9 w-auto" />
+            <img
+  src="/orbit-logo.png"
+  alt={`${BRAND.name} logo`}
+  width={192}
+  height={64}
+  className="h-9 w-auto object-contain"
+/>
             <p className="mt-4 max-w-sm text-sm leading-relaxed text-muted-foreground">{BRAND.mission}</p>
             <p className="mt-4 text-sm font-semibold text-foreground">{BRAND.supporting}</p>
           </div>
