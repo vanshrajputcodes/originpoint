@@ -7,6 +7,7 @@ import { NAV_CENTER, FOOTER_GROUPS, LEGAL_LINKS } from "@/data/site";
 import { PROGRAMS } from "@/data/programs";
 import { WHATSAPP } from "@/lib/whatsapp";
 import { cn } from "@/lib/utils";
+import orbitLogo from "@/assets/orbit-logo.png.asset.json";
 
 const JOIN_REL = "noopener noreferrer";
 
