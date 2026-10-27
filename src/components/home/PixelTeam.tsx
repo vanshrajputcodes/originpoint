@@ -1,23 +1,13 @@
-import { useEffect, useRef } from "react";
+"use client";
+
+import { useEffect, useRef, useState } from "react";
 import { useReducedMotion } from "framer-motion";
-import teamAsset from "@/assets/team-photo.png.asset.json";
 
-/**
- * The real ORIGIN POINT study-team photo rendered as a live pixel mosaic.
- *
- * The photo is sampled into a grid of round particles. At rest the mosaic is
- * a faint, shimmering dot-matrix of the image; moving the pointer across it
- * lights particles up near the cursor — full color, slightly enlarged, gently
- * pushed aside — with a smooth trail that fades back to rest. Particles only
- * ever exist inside the photo's silhouette (its white background is skipped).
- *
- * Static full render under prefers-reduced-motion; no interaction there.
- */
-
-const SOURCE_ASPECT = 2; // source image is 1774x887
-const CELL = 6; // css px per particle cell
-const INFLUENCE_RADIUS = 150; // css px around the pointer
+const IMAGE_SRC = "/team-photo.png";
+const SOURCE_ASPECT = 2;
+const CELL = 8;
 const MAX_PARTICLES = 6000;
+const REVEAL_DURATION = 1400;
 
 interface Particle {
   x: number;
@@ -25,200 +15,258 @@ interface Particle {
   r: number;
   g: number;
   b: number;
-  phase: number;
-  e: number; // energy 0..1 (cursor proximity, eased)
-  ox: number;
-  oy: number; // eased push-away offset
+  delay: number;
 }
 
 export function PixelTeam() {
-  const reduced = useReducedMotion();
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const reducedMotion = useReducedMotion();
+
+  const [showRealImage, setShowRealImage] = useState(false);
+  const [imageLoaded, setImageLoaded] = useState(false);
 
   useEffect(() => {
     const wrap = wrapRef.current;
     const canvas = canvasRef.current;
-    if (!wrap || !canvas) return;
+
+    if (!wrap || !canvas || !imageLoaded || reducedMotion) {
+      if (reducedMotion && imageLoaded) {
+        setShowRealImage(true);
+      }
+      return;
+    }
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const image = new Image();
+    image.src = IMAGE_SRC;
 
     let particles: Particle[] = [];
+    let raf = 0;
     let width = 0;
     let height = 0;
-    let raf = 0;
-    let visible = true;
-    let built = false;
-    const pointer = { x: 0, y: 0, sx: 0, sy: 0, active: false };
+    let visible = false;
+    let started = false;
+    let startTime = 0;
+    let disposed = false;
+
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
 
-    const drawStatic = () => {
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, width, height);
-      for (const p of particles) {
-        ctx.fillStyle = `rgba(${p.r},${p.g},${p.b},0.9)`;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, CELL * 0.36, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    };
+    function finishAnimation() {
+      if (disposed) return;
+      cancelAnimationFrame(raf);
+      setShowRealImage(true);
+    }
 
-    const build = () => {
+    function draw(timestamp: number) {
+      if (disposed || !visible) return;
+
       width = wrap.clientWidth;
-      if (!width || !img.complete || !img.naturalWidth) return;
-      height = Math.round(width / SOURCE_ASPECT);
-      canvas.width = Math.round(width * dpr);
-      canvas.height = Math.round(height * dpr);
+      height = width / SOURCE_ASPECT;
+
+      if (!width || !height) return;
+
+      ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx!.clearRect(0, 0, width, height);
+
+      const progress = Math.min(
+        1,
+        (timestamp - startTime) / REVEAL_DURATION
+      );
+
+      for (const p of particles) {
+        const localProgress = Math.max(
+          0,
+          Math.min(1, (progress - p.delay) / 0.7)
+        );
+
+        const eased =
+          1 - Math.pow(1 - localProgress, 3);
+
+        const size = CELL * 0.92 * eased;
+        const alpha = eased;
+
+        if (size <= 0.1) continue;
+
+        ctx!.globalAlpha = alpha;
+        ctx!.fillStyle = `rgb(${p.r}, ${p.g}, ${p.b})`;
+
+        ctx!.fillRect(
+          p.x - size / 2,
+          p.y - size / 2,
+          size,
+          size
+        );
+      }
+
+      ctx!.globalAlpha = 1;
+
+      if (progress < 1) {
+        raf = requestAnimationFrame(draw);
+      } else {
+        finishAnimation();
+      }
+    }
+
+    function build() {
+      if (
+        disposed ||
+        !image.complete ||
+        !image.naturalWidth ||
+        !wrap.clientWidth
+      ) {
+        return;
+      }
+
+      width = wrap.clientWidth;
+      height = width / SOURCE_ASPECT;
+
+      canvas!.width = Math.round(width * dpr);
+      canvas!.height = Math.round(height * dpr);
+      canvas!.style.width = "100%";
+      canvas!.style.height = "100%";
 
       let cell = CELL;
       let cols = Math.max(2, Math.floor(width / cell));
       let rows = Math.max(2, Math.floor(height / cell));
-      // Grow the cell if the grid would produce too many particles.
+
       while (cols * rows > MAX_PARTICLES) {
         cell += 1;
         cols = Math.max(2, Math.floor(width / cell));
         rows = Math.max(2, Math.floor(height / cell));
       }
 
-      const off = document.createElement("canvas");
-      off.width = cols;
-      off.height = rows;
-      const octx = off.getContext("2d", { willReadFrequently: true });
-      if (!octx) return;
-      octx.drawImage(img, 0, 0, cols, rows);
-      const data = octx.getImageData(0, 0, cols, rows).data;
+      const sample = document.createElement("canvas");
+      sample.width = cols;
+      sample.height = rows;
+
+      const sampleCtx = sample.getContext("2d", {
+        willReadFrequently: true,
+      });
+
+      if (!sampleCtx) {
+        finishAnimation();
+        return;
+      }
+
+      sampleCtx.drawImage(image, 0, 0, cols, rows);
+
+      const pixels = sampleCtx.getImageData(
+        0,
+        0,
+        cols,
+        rows
+      ).data;
 
       const cellW = width / cols;
       const cellH = height / rows;
-      const next: Particle[] = [];
-      for (let gy = 0; gy < rows; gy++) {
-        for (let gx = 0; gx < cols; gx++) {
-          const i = (gy * cols + gx) * 4;
-          const a = data[i + 3] ?? 0;
-          const r = data[i] ?? 0;
-          const g = data[i + 1] ?? 0;
-          const b = data[i + 2] ?? 0;
+
+      particles = [];
+
+      for (let y = 0; y < rows; y++) {
+        for (let x = 0; x < cols; x++) {
+          const i = (y * cols + x) * 4;
+
+          const r = pixels[i];
+          const g = pixels[i + 1];
+          const b = pixels[i + 2];
+          const a = pixels[i + 3];
+
           if (a < 40) continue;
-          if (r > 242 && g > 242 && b > 242) continue; // skip the photo's white background
-          next.push({
-            x: (gx + 0.5) * cellW,
-            y: (gy + 0.5) * cellH,
+          if (r > 250 && g > 250 && b > 250) continue;
+
+          particles.push({
+            x: (x + 0.5) * cellW,
+            y: (y + 0.5) * cellH,
             r,
             g,
             b,
-            phase: Math.random() * Math.PI * 2,
-            e: 0,
-            ox: 0,
-            oy: 0,
+            delay: Math.random() * 0.22,
           });
         }
       }
-      particles = next;
-      built = true;
-      if (reduced) drawStatic();
-    };
 
-    const tick = (t: number) => {
-      raf = requestAnimationFrame(tick);
-      if (!visible || !built) return;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, width, height);
-
-      const radius = INFLUENCE_RADIUS;
-      const r2 = radius * radius;
-      pointer.sx += (pointer.x - pointer.sx) * 0.22;
-      pointer.sy += (pointer.y - pointer.sy) * 0.22;
-      const time = t / 1000;
-
-      for (const p of particles) {
-        let target = 0;
-        let pushX = 0;
-        let pushY = 0;
-        if (pointer.active) {
-          const dx = p.x - pointer.sx;
-          const dy = p.y - pointer.sy;
-          const d2 = dx * dx + dy * dy;
-          if (d2 < r2) {
-            const d = Math.sqrt(d2) || 1;
-            const falloff = 1 - d / radius;
-            target = falloff * falloff;
-            const push = target * 9;
-            pushX = (dx / d) * push;
-            pushY = (dy / d) * push;
-          }
-        }
-        // Fast rise near the cursor, slow decay = a smooth trailing wake.
-        p.e += (target - p.e) * (target > p.e ? 0.3 : 0.06);
-        p.ox += (pushX - p.ox) * 0.16;
-        p.oy += (pushY - p.oy) * 0.16;
-
-        const wobble = Math.sin(time * 1.4 + p.phase) * 0.45;
-        const size = CELL * 0.32 * (0.6 + p.e * 1.1) + p.e * 0.7;
-        const alpha = 0.15 + p.e * 0.85;
-        ctx.fillStyle = `rgba(${p.r},${p.g},${p.b},${alpha})`;
-        ctx.beginPath();
-        ctx.arc(p.x + p.ox + wobble, p.y + p.oy - p.e * 3, size, 0, Math.PI * 2);
-        ctx.fill();
+      if (!started && visible) {
+        started = true;
+        startTime = performance.now();
+        raf = requestAnimationFrame(draw);
       }
+    }
+
+    image.onload = build;
+
+    image.onerror = () => {
+      finishAnimation();
     };
 
-    const img = new Image();
-    img.decoding = "async";
-    img.onload = build;
-    img.src = teamAsset.url;
-    if (img.complete) build();
+    if (image.complete && image.naturalWidth) {
+      build();
+    }
 
-    const onMove = (e: PointerEvent) => {
-      if (reduced || e.pointerType === "touch") return;
-      const rect = canvas.getBoundingClientRect();
-      pointer.x = e.clientX - rect.left;
-      pointer.y = e.clientY - rect.top;
-      pointer.active = true;
-    };
-    const onLeave = () => {
-      pointer.active = false;
-    };
-    wrap.addEventListener("pointermove", onMove, { passive: true });
-    wrap.addEventListener("pointerleave", onLeave, { passive: true });
+    const observer = new IntersectionObserver(
+      (entries) => {
+        visible = entries[0]?.isIntersecting ?? false;
 
-    let resizeRaf = 0;
-    const ro = new ResizeObserver(() => {
-      cancelAnimationFrame(resizeRaf);
-      resizeRaf = requestAnimationFrame(build);
+        if (visible && !started && particles.length > 0) {
+          started = true;
+          startTime = performance.now();
+          raf = requestAnimationFrame(draw);
+        }
+
+        if (!visible) {
+          cancelAnimationFrame(raf);
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    observer.observe(wrap);
+
+    const resizeObserver = new ResizeObserver(() => {
+      if (!started) {
+        cancelAnimationFrame(raf);
+        build();
+      }
     });
-    ro.observe(wrap);
 
-    const io = new IntersectionObserver((entries) => {
-      visible = entries[0]?.isIntersecting ?? true;
-    });
-    io.observe(wrap);
-
-    raf = requestAnimationFrame(tick);
+    resizeObserver.observe(wrap);
 
     return () => {
+      disposed = true;
       cancelAnimationFrame(raf);
-      cancelAnimationFrame(resizeRaf);
-      ro.disconnect();
-      io.disconnect();
-      wrap.removeEventListener("pointermove", onMove);
-      wrap.removeEventListener("pointerleave", onLeave);
-      img.onload = null;
+      observer.disconnect();
+      resizeObserver.disconnect();
+      image.onload = null;
+      image.onerror = null;
     };
-  }, [reduced]);
+  }, [imageLoaded, reducedMotion]);
 
   return (
     <div
       ref={wrapRef}
-      data-cursor
-      data-cursor-label="Team"
       role="img"
-      aria-label="The ORIGIN POINT study team: five students celebrating around their laptops"
-      className="relative mx-auto w-full max-w-[560px]"
+      aria-label="The ORIGIN POINT study team"
+      className="relative mx-auto w-full max-w-[560px] overflow-hidden"
       style={{ aspectRatio: "2 / 1" }}
     >
-      <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" />
+      <img
+        src={IMAGE_SRC}
+        alt="The ORIGIN POINT study team"
+        onLoad={() => setImageLoaded(true)}
+        onError={() => setImageLoaded(false)}
+        className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-500 ${
+          showRealImage ? "opacity-100" : "opacity-0"
+        }`}
+      />
+
+      {!showRealImage && (
+        <canvas
+          ref={canvasRef}
+          className="absolute inset-0 block h-full w-full"
+        />
+      )}
     </div>
   );
 }

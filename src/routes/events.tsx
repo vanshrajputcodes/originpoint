@@ -3,8 +3,11 @@ import { CalendarX2 } from "lucide-react";
 import { PageHero, CtaBand } from "@/components/shared/PageHero";
 import { SectionHeading } from "@/components/shared/SectionHeading";
 import { Reveal } from "@/components/shared/Reveal";
+import { FaqAccordion } from "@/components/shared/FaqAccordion";
 import { EVENT_CATEGORIES, CONFIRMED_EVENTS, type EventItem } from "@/data/events";
 import { WHATSAPP } from "@/lib/whatsapp";
+import { HACKATHON, HACKATHON_RULES, HACKATHON_FAQS } from "@/data/hackathon";
+import hackathonBanner from "@/assets/hackathon-banner.jpg";
 
 export const Route = createFileRoute("/events")({
   head: () => ({
@@ -21,6 +24,12 @@ export const Route = createFileRoute("/events")({
         content: "Where the community shows up — build, learn, and compete together.",
       },
       { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary" },
+      { name: "twitter:title", content: "Hackathons & Events — ORIGIN POINT" },
+      {
+        name: "twitter:description",
+        content: "Where the community shows up — build, learn, and compete together.",
+      },
     ],
   }),
   component: EventsPage,
@@ -71,6 +80,63 @@ function EventsPage() {
           Join Community
         </a>
       </PageHero>
+
+      <section id="hackathon" className="border-t border-border bg-card">
+        <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8 lg:py-24">
+          <SectionHeading eyebrow="Flagship hackathon" title={HACKATHON.fullName} description={HACKATHON.tagline} />
+          <Reveal>
+            <img
+              src={hackathonBanner}
+              alt="ORIGIN POINT Hackathon banner — total prizes worth ₹25,000"
+              width={1993}
+              height={789}
+              className="mt-10 w-full rounded-3xl border border-border"
+            />
+          </Reveal>
+          <div className="mt-8 grid gap-8 lg:grid-cols-[1.4fr_1fr]">
+            <div>
+              <p className="leading-relaxed text-muted-foreground">{HACKATHON.description}</p>
+              <ul className="mt-6 grid gap-3 sm:grid-cols-2">
+                {HACKATHON.highlights.map((h) => (
+                  <li key={h.title} className="rounded-2xl border border-border bg-background p-4">
+                    <p className="text-sm font-semibold text-foreground">{h.title}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{h.text}</p>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="rounded-3xl border border-border bg-background p-6">
+              <dl className="space-y-3 text-sm">
+                {[
+                  ["Date", HACKATHON.date],
+                  ["Mode", HACKATHON.mode],
+                  ["Prizes", HACKATHON.prizePool],
+                  ["Target", HACKATHON.registrationTarget],
+                ].map(([k, v]) => (
+                  <div key={k} className="flex justify-between gap-4 border-b border-border pb-3">
+                    <dt className="text-muted-foreground">{k}</dt>
+                    <dd className="text-right font-semibold text-foreground">{v}</dd>
+                  </div>
+                ))}
+              </dl>
+              {HACKATHON.registrationUrl ? (
+                <a
+                  href={HACKATHON.registrationUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-6 inline-flex h-11 w-full items-center justify-center rounded-xl bg-primary px-6 text-sm font-semibold text-primary-foreground hover:bg-primary/90"
+                >
+                  Register now
+                </a>
+              ) : (
+                <span className="mt-6 inline-flex h-11 w-full items-center justify-center rounded-xl bg-secondary px-6 text-sm font-semibold text-muted-foreground">
+                  Registration opens soon
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
 
       <section className="border-t border-border">
         <div className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8 lg:py-24">

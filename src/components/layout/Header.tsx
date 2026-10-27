@@ -7,7 +7,7 @@ import { NAV_CENTER, FOOTER_GROUPS, LEGAL_LINKS } from "@/data/site";
 import { PROGRAMS } from "@/data/programs";
 import { WHATSAPP } from "@/lib/whatsapp";
 import { cn } from "@/lib/utils";
-import orbitLogo from "@/assets/orbit-logo.png.asset.json";
+import logoUrl from "@/assets/logo.png";
 
 const JOIN_REL = "noopener noreferrer";
 
@@ -142,7 +142,7 @@ export function Header() {
         <nav aria-label="Main" className="mx-auto flex h-16 max-w-7xl items-center gap-4 px-4 sm:px-6 lg:px-8">
           <Link to="/" className="flex shrink-0 items-center gap-2" aria-label="ORIGIN POINT home">
             <img
-              src={orbitLogo.url}
+              src={logoUrl}
               alt={`${BRAND.name} logo`}
               width={192}
               height={64}
@@ -289,7 +289,7 @@ export function Footer() {
       <div className="mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8">
         <div className="grid gap-10 md:grid-cols-[1.4fr_repeat(3,1fr)]">
           <div>
-            <img src={orbitLogo.url} alt={`${BRAND.name} logo`} width={192} height={64} className="h-9 w-auto" />
+            <img src={logoUrl} alt={`${BRAND.name} logo`} width={192} height={64} className="h-9 w-auto" />
             <p className="mt-4 max-w-sm text-sm leading-relaxed text-muted-foreground">{BRAND.mission}</p>
             <p className="mt-4 text-sm font-semibold text-foreground">{BRAND.supporting}</p>
           </div>
