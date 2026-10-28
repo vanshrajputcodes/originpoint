@@ -2,8 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useReducedMotion } from "framer-motion";
+import teamPhoto from "@/assets/team-photo.png";
 
-const IMAGE_SRC = "/team-photo.png";
+const IMAGE_SRC = teamPhoto;
 const SOURCE_ASPECT = 2;
 const CELL = 8;
 const MAX_PARTICLES = 6000;
